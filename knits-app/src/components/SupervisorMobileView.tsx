@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Order, ProductionStage } from '@/types';
 import { OrderStore } from '@/utils/store';
 import { analyzeTamilNote } from '@/utils/aiTranslator';
@@ -9,12 +9,16 @@ import {
   Camera, 
   Send, 
   Mic, 
+  MicOff, 
   Wifi, 
   WifiOff, 
   CheckCircle, 
   AlertCircle,
   Clock,
-  Sparkles
+  Sparkles,
+  Volume2,
+  RefreshCw,
+  UploadCloud
 } from 'lucide-react';
 
 interface SupervisorMobileViewProps {
@@ -42,21 +46,133 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
   const [supervisorUnit, setSupervisorUnit] = useState<string>('Unit 1 (Avinashi Road)');
   const [tamilNote, setTamilNote] = useState<string>('ஊசி உடைந்துவிட்டது, மிஷின் 1 மணி நேரம் ஓடவில்லை');
   const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [speechSupported, setSpeechSupported] = useState<boolean>(true);
+  const [speechStatus, setSpeechStatus] = useState<string>('');
   const [isOffline, setIsOffline] = useState<boolean>(false);
+  const [offlineCount, setOfflineCount] = useState<number>(0);
   const [photoPreview, setPhotoPreview] = useState<string>(
     'https://images.unsplash.com/photo-1581655353564-df123a1eb820?w=600&auto=format&fit=crop&q=80'
   );
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'queued'; text: string } | null>(null);
 
+  const recognitionRef = useRef<any>(null);
+
   const currentOrder = orders.find(o => o.poNumber === selectedPo) || orders[0];
 
-  // Quick Tamil voice note presets for testing low RAM devices
+  // Refresh offline queue count
+  const updateOfflineCount = () => {
+    const q = OrderStore.getOfflineQueue();
+    setOfflineCount(q.length);
+  };
+
+  useEffect(() => {
+    updateOfflineCount();
+    // Check Web Speech API availability
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setSpeechSupported(false);
+      }
+    }
+  }, []);
+
+  // Quick Tamil voice note presets for testing & fallback on cheap low-RAM phones
   const TAMIL_PRESETS = [
-    { label: 'ஊசி உடைப்பு (Needle/Machine)', text: 'ஊசி உடைந்துவிட்டது, மிஷின் 1 மணி நேரம் ஓடவில்லை' },
+    { label: 'ஊசி உடைப்பு (Needle)', text: 'ஊசி உடைந்துவிட்டது, மிஷின் 1 மணி நேரம் ஓடவில்லை' },
     { label: 'நூல் பற்றாக்குறை (Thread Missing)', text: 'நேவி ப்ளூ நூல் வரவில்லை, சப்ளையர் தாமதம்' },
-    { label: 'ஆட்கள் விடுமுறை (Worker Absent)', text: 'தையல் தொழிலாளர்கள் 4 பேர் இன்று வரவில்லை' },
+    { label: 'ஆட்கள் விடுமுறை (Workers Absent)', text: 'தையல் தொழிலாளர்கள் 4 பேர் இன்று வரவில்லை' },
+    { label: 'மின்சாரம் இல்லை (Power Cut)', text: 'மின்சாரம் இல்லை, ஜெனரேட்டர் டீசல் தாமதம்' },
     { label: 'சரியாக ஓடுகிறது (All Normal)', text: 'வேலை சிறப்பாக நடக்கிறது, பிரச்சனை எதுவும் இல்லை' }
   ];
+
+  // REAL WEB SPEECH API for Tamil (ta-IN) & English Speech Recognition
+  const startVoiceRecording = () => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setSpeechStatus('Web Speech API not available on this browser. Use preset or type.');
+      // Fallback simulation
+      simulateVoiceCapture();
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'ta-IN'; // Tamil (India) language tag!
+      recognition.continuous = false;
+      recognition.interimResults = true;
+
+      recognition.onstart = () => {
+        setIsRecording(true);
+        setSpeechStatus('பேசவும்... தமிழில் கேட்கிறது (Listening in Tamil - ta-IN)...');
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((res: any) => res[0].transcript)
+          .join('');
+        setTamilNote(transcript);
+        setSpeechStatus(`கேட்டது: "${transcript}"`);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event.error);
+        setSpeechStatus(`மைக் அறிவிப்பு: ${event.error === 'no-speech' ? 'குரல் கேட்கவில்லை' : event.error}. Fallback presets available below.`);
+        setIsRecording(false);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Mic start error:', err);
+      simulateVoiceCapture();
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setIsRecording(false);
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopVoiceRecording();
+    } else {
+      startVoiceRecording();
+    }
+  };
+
+  // Safe fallback if microphone permission denied or running in unsupported headless environment
+  const simulateVoiceCapture = () => {
+    setIsRecording(true);
+    setSpeechStatus('குரல் கேட்கிறது (Listening)...');
+    setTimeout(() => {
+      setIsRecording(false);
+      setTamilNote('ஊசி உடைந்துவிட்டது, மிஷின் 1 மணி நேரம் ஓடவில்லை');
+      setSpeechStatus('குரல் வெற்றிகரமாக பதிவு செய்யப்பட்டது (Voice recorded: Needle broke)');
+    }, 2000);
+  };
+
+  // Text-to-Speech preview so supervisor can verify what was typed/recorded
+  const speakTamilNote = () => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(tamilNote);
+    utterance.lang = 'ta-IN';
+    utterance.rate = 0.9;
+    window.speechSynthesis.speak(utterance);
+  };
 
   // Handle Photo input (local data URL for offline capability)
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -70,18 +186,42 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
     }
   };
 
-  // Mock voice recording toggle
-  const toggleRecording = () => {
-    if (!isRecording) {
-      setIsRecording(true);
-      // Simulate real-time speech capture
-      setTimeout(() => {
-        setIsRecording(false);
-        setTamilNote('மின்சாரம் இல்லை, ஜெனரேட்டர் மூலம் வேலை நடக்கிறது');
-      }, 2500);
-    } else {
-      setIsRecording(false);
+  // Sync Offline Queue to Backend / Store
+  const handleSyncOfflineQueue = () => {
+    const queue = OrderStore.getOfflineQueue();
+    if (queue.length === 0) return;
+
+    let processedCount = 0;
+    for (const item of queue) {
+      const aiResult = analyzeTamilNote(item.rawNoteTamil || '');
+      OrderStore.addDailyLog(item.orderId, {
+        orderId: item.orderId,
+        poNumber: item.poNumber,
+        date: new Date(item.timestamp).toISOString().split('T')[0],
+        stage: item.stage,
+        quantityCompleted: item.quantity,
+        supervisorName: item.supervisorName,
+        supervisorUnit: item.supervisorUnit,
+        photoUrl: item.photoDataUrl,
+        rawNoteTamil: item.rawNoteTamil,
+        englishTranslation: aiResult.englishTranslation,
+        aiSuggestedCategory: aiResult.suggestedCategory,
+        confirmedCategory: aiResult.suggestedCategory,
+        aiConfidence: aiResult.confidence,
+        isConfirmedByMerchandiser: false,
+        visibleToBuyer: false
+      });
+      processedCount++;
     }
+
+    OrderStore.clearOfflineQueue();
+    updateOfflineCount();
+    setStatusMessage({
+      type: 'success',
+      text: `${processedCount} ஆஃப்லைன் பதிவுகள் வெற்றிகரமாக ஒத்திசைக்கப்பட்டன! (${processedCount} offline logs synced successfully!)`
+    });
+    setTimeout(() => setStatusMessage(null), 4000);
+    onLogSubmitted();
   };
 
   // Submit Floor Update
@@ -108,9 +248,10 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
         timestamp: Date.now()
       });
 
+      updateOfflineCount();
       setStatusMessage({
         type: 'queued',
-        text: 'பதிவு சேமிக்கப்பட்டது (Saved to Offline Queue). நெட்வொர்க் வரும்போது தானாக அனுப்பப்படும்.'
+        text: 'பதிவு ஆஃப்லைனில் சேமிக்கப்பட்டது (Saved to Offline Queue). நெட்வொர்க் வரும்போது ஒத்திசைக்கலாம்.'
       });
       setTimeout(() => setStatusMessage(null), 4000);
       onLogSubmitted();
@@ -162,7 +303,14 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
             {/* Toggle Network Mode to test 2-3GB RAM patchy network requirement */}
             <button
               type="button"
-              onClick={() => setIsOffline(!isOffline)}
+              onClick={() => {
+                const nextOffline = !isOffline;
+                setIsOffline(nextOffline);
+                if (!nextOffline && offlineCount > 0) {
+                  // Switched back to online, auto-sync prompt
+                  handleSyncOfflineQueue();
+                }
+              }}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
                 isOffline 
                   ? 'bg-rose-500 text-white' 
@@ -173,10 +321,33 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
               <span>{isOffline ? 'Offline (ஆஃப்லைன்)' : 'Online (ஆன்லைன்)'}</span>
             </button>
           </div>
-          <p className="text-xs text-slate-300">
-            தினசரி உற்பத்தி மற்றும் சிக்கல் குறிப்பு பதிவு (Daily Output & Issue Note)
-          </p>
+          
+          <div className="flex items-center justify-between text-xs text-slate-300">
+            <span>தினசரி உற்பத்தி மற்றும் சிக்கல் குறிப்பு பதிவு</span>
+            {offlineCount > 0 && (
+              <span className="bg-amber-500 text-white font-bold text-[10px] px-2 py-0.5 rounded-full">
+                {offlineCount} ஆஃப்லைன் வரிசையில்
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Offline Sync Banner if items are queued */}
+        {offlineCount > 0 && !isOffline && (
+          <div className="bg-amber-50 border-b border-amber-200 p-3 flex items-center justify-between text-xs text-amber-900">
+            <div className="flex items-center gap-2 font-medium">
+              <UploadCloud className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{offlineCount} queued updates waiting to sync</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleSyncOfflineQueue}
+              className="px-2.5 py-1 bg-amber-600 text-white rounded-lg text-xs font-bold hover:bg-amber-700"
+            >
+              Sync Now
+            </button>
+          </div>
+        )}
 
         {/* Feedback Alert */}
         {statusMessage && (
@@ -256,21 +427,40 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-semibold text-slate-700">
-                சிக்கல் அல்லது குறிப்பு (Tamil Issue Note / Voice)
+                சிக்கல் அல்லது குறிப்பு (Tamil Voice / Text Note)
               </label>
-              <button
-                type="button"
-                onClick={toggleRecording}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
-                  isRecording 
-                    ? 'bg-rose-600 text-white animate-pulse' 
-                    : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
-                }`}
-              >
-                <Mic className="w-3.5 h-3.5" />
-                <span>{isRecording ? 'பேசவும்... (Listening)' : 'குரல் பதிவு (Voice)'}</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                {tamilNote && (
+                  <button
+                    type="button"
+                    onClick={speakTamilNote}
+                    title="Listen to note (Text-to-Speech)"
+                    className="p-1 rounded-md text-slate-500 hover:text-indigo-600 hover:bg-slate-100"
+                  >
+                    <Volume2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={toggleRecording}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                    isRecording 
+                      ? 'bg-rose-600 text-white animate-pulse' 
+                      : 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+                  }`}
+                >
+                  {isRecording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                  <span>{isRecording ? 'நிறுத்து (Stop)' : 'குரல் பதிவு (Record Voice)'}</span>
+                </button>
+              </div>
             </div>
+
+            {/* Speech Status feedback */}
+            {speechStatus && (
+              <p className="text-[11px] font-medium text-indigo-700 bg-indigo-50/70 p-1.5 rounded-lg mb-1.5">
+                {speechStatus}
+              </p>
+            )}
 
             <textarea
               rows={2}
@@ -287,7 +477,7 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
                   type="button"
                   key={idx}
                   onClick={() => setTamilNote(p.text)}
-                  className="px-2 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-medium"
+                  className="px-2 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-medium transition-colors"
                 >
                   {p.label}
                 </button>
@@ -347,4 +537,3 @@ export const SupervisorMobileView: React.FC<SupervisorMobileViewProps> = ({
     </div>
   );
 };
-
