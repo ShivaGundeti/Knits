@@ -82,3 +82,4 @@ export interface Order {
   logs: DailyProductionLog[];
   dateChangeHistory: DateChangeAudit[];
 }
+
