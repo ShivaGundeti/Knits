@@ -2,6 +2,7 @@
 **Project Name**: Knits — Knitwear Exporter Production Tracking & Delay Warning SaaS  
 **Client**: Company A, Tiruppur, India (₹95–110 Crore revenue, 900 factory workers, 3 units)  
 **GitHub Repository**: [https://github.com/ShivaGundeti/Knits.git](https://github.com/ShivaGundeti/Knits.git)  
+**Architecture**: Next.js 15 App Router Frontend + NestJS Enterprise REST API Backend  
 **Author**: Shiva Gundeti (Software Engineering Candidate)  
 
 ---
@@ -38,25 +39,25 @@ Company A manufactures knitwear in Tiruppur for UK and European retail buyers. T
          ├── TNA Milestone Setup                 ├── Voice / Text Tamil Note
          ├── AI Human-in-the-Loop Review         ├── Floor Photo Capture
          └── Buyer Export Reports (PDF)          └── Offline-First IndexedDB
-                                                         │
-                                                         ▼
-                                              ┌──────────────────────┐
-                                              │   AI INTENT ENGINE   │
-                                              │   Tamil -> English   │
-                                              │ Category Classifier  │
-                                              └──────────────────────┘
-                                                         │
-                                                         ▼
-                                              ┌──────────────────────┐
-                                              │ BUYER PORTAL (UK/EU) │
-                                              │ Strict Multi-Tenant  │
-                                              │ Verified Photos Only │
-                                              └──────────────────────┘
+                         │                               │
+                         └──────────────┬────────────────┘
+                                        │ (HTTP REST / JSON)
+                                        ▼
+                         ┌──────────────────────────────┐
+                         │   NESTJS BACKEND SERVICE     │
+                         │      (knits-backend)         │
+                         └──────────────────────────────┘
+                                        │
+                         ├── OrdersController & Service
+                         ├── RunRateEngine (Pacing & Sundays)
+                         ├── AiTranslator (Tamil -> Category)
+                         ├── Multi-Tenant Guard (Tenant Isolation)
+                         └── DateChangeAudit Trail
 ```
 
 ### Technology Decisions & Rationale:
-1. **Next.js 15 (App Router) + TypeScript**: Full-stack type safety, ultra-fast client hydration, unified API and frontend rendering.
-2. **Tailwind CSS**: Minimalist design philosophy emphasizing whitespace, typography, and clear status signals. Zero visual clutter.
+1. **Next.js 15 (App Router)**: Fast rendering, responsive layout for mobile supervisors and desktop merchandisers, client-side offline caching.
+2. **NestJS Backend (`knits-backend`)**: Strongly-typed modular enterprise TypeScript backend with Dependency Injection, Controllers, Services, DTO validation pipes, and multi-tenant security headers.
 3. **Run-Rate Mathematical Engine**: Algorithmic projection of actual floor velocity vs. required daily pace, strictly excluding non-working factory Sundays.
 4. **AI Tamil Translation & Delay Taxonomy Classifier**: Converts conversational Tamil audio/text into standardized garment delay categories with confidence scoring and human-in-the-loop merchandiser verification.
 5. **Offline Queue Sync**: Custom browser storage queue ensuring zero data loss on 2–3 GB RAM phones in corrugated tin-roof factories with patchy cellular coverage.
@@ -64,7 +65,7 @@ Company A manufactures knitwear in Tiruppur for UK and European retail buyers. T
 
 ---
 
-## 3. Core Data Models
+## 3. Core Data Models & API Contracts
 
 ```typescript
 export type ProductionStage = 
@@ -91,24 +92,15 @@ export interface Order {
   logs: DailyProductionLog[];
   dateChangeHistory: DateChangeAudit[];
 }
-
-export interface DailyProductionLog {
-  id: string;
-  orderId: string;
-  date: string;
-  stage: ProductionStage;
-  quantityCompleted: number;
-  supervisorName: string;
-  photoUrl?: string;
-  rawNoteTamil?: string;
-  englishTranslation?: string;
-  aiSuggestedCategory?: string;
-  confirmedCategory?: string;
-  aiConfidence?: number;
-  isConfirmedByMerchandiser: boolean;
-  visibleToBuyer: boolean;
-}
 ```
+
+### REST API Endpoints in NestJS (`/orders`):
+* `GET /orders` — Fetch active production orders with run-rate projections.
+* `GET /orders/:id` — Fetch order details (enforces `x-buyer-tenant-id` security header).
+* `POST /orders` — Setup new order with automated TNA milestone template.
+* `POST /orders/log` — Supervisor daily output submission with AI Tamil categorization.
+* `PATCH /orders/:orderId/logs/:logId/category` — Merchandiser category approval / buyer gate toggle.
+* `PATCH /orders/:orderId/ex-factory-date` — Change Ex-factory date with mandatory compliance justification.
 
 ---
 

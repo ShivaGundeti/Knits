@@ -1,6 +1,6 @@
 # Deployment & Setup Guide (`deployment.md`)
 
-This guide explains how to run **Knits** locally for reviewer evaluation and describes production deployment settings.
+This guide explains how to run the full-stack **Knits** platform (NestJS Backend + Next.js Frontend) locally for reviewer evaluation and describes production deployment settings.
 
 ---
 
@@ -11,24 +11,38 @@ This guide explains how to run **Knits** locally for reviewer evaluation and des
 * **npm**: v9+ or v10+
 * **Git**
 
-### Steps
+### Step A: Start the NestJS Backend (`knits-backend`)
 ```bash
-# 1. Clone the repository
-git clone https://github.com/ShivaGundeti/Knits.git
-cd Knits
+# 1. Navigate to backend directory
+cd knits-backend
 
-# 2. Navigate to the application directory
+# 2. Install dependencies (if not already installed)
+npm install
+
+# 3. Start the NestJS REST API (runs on port 4000)
+npm run start
+```
+The NestJS API will be available at: `http://localhost:4000/orders`
+
+---
+
+### Step B: Start the Next.js Frontend (`knits-app`)
+In a new terminal window:
+```bash
+# 1. Navigate to frontend directory
 cd knits-app
 
-# 3. Install dependencies
+# 2. Install dependencies
 npm install --legacy-peer-deps
 
-# 4. Start the development server
+# 3. Start the Next.js development server (runs on port 3000)
 npm run dev
 ```
 
 Open your browser at:
 `http://localhost:3000`
+
+*(Note: The frontend has automatic offline fallback storage, so if the NestJS backend is temporarily stopped, the application continues to run seamlessly without breaking).*
 
 ---
 
@@ -53,14 +67,20 @@ The application comes pre-loaded with the 3 sample purchase orders from the clie
 
 ## 4. Production Environment Configuration
 
-When deploying to Vercel, Netlify, or AWS Amplify, set the following environment variable names (values kept private as per security rules):
+When deploying to Vercel, Netlify, Railway, or AWS, configure the following environment variable names (values kept private as per security rules):
 
 ```env
+# Backend Service URL (used by Next.js frontend)
+NEXT_PUBLIC_API_URL=http://localhost:4000
+
+# Backend Listening Port
+PORT=4000
+
 # AI Service API (e.g. Gemini / OpenAI / Cloud Speech-to-Text)
 AI_TRANSLATION_API_KEY=
 AI_TRANSLATION_MODEL=
 
-# Database / Storage (if switching from browser store to managed PostgreSQL/Neon)
+# Database / Storage (if switching from in-memory/browser store to managed PostgreSQL/Neon)
 DATABASE_URL=
 DIRECT_URL=
 
@@ -79,6 +99,11 @@ AWS_SECRET_ACCESS_KEY=
 ## 5. Automated Tests
 To run the automated test suite verifying the run-rate mathematical engine and Tamil translation categorization:
 ```bash
+# In knits-backend:
+cd knits-backend
+npm run test
+
+# In knits-app:
 cd knits-app
 npx vitest run
 ```

@@ -4,6 +4,7 @@ import { calculateRunRate } from '@/utils/runRate';
 
 const STORAGE_KEY = 'knits_production_orders_v1';
 const OFFLINE_QUEUE_KEY = 'knits_offline_queue_v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export class OrderStore {
   static getOrders(): Order[] {
@@ -44,6 +45,16 @@ export class OrderStore {
     };
     orders.unshift(createdOrder);
     this.saveOrders(orders);
+
+    // Asynchronously notify NestJS backend if running
+    fetch(`${API_BASE}/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newOrder)
+    }).catch(() => {
+      // Graceful offline fallback
+    });
+
     return createdOrder;
   }
 
@@ -59,12 +70,10 @@ export class OrderStore {
       createdAt: new Date().toISOString()
     };
 
-    // Update cumulative completed count for the current stage
     if (order.currentStage === log.stage) {
       order.stageQuantityCompleted += log.quantityCompleted;
     }
 
-    // Update milestone
     const milestone = order.milestones.find(m => m.stage === log.stage);
     if (milestone) {
       milestone.completedQty = Math.min(order.totalQuantity, milestone.completedQty + log.quantityCompleted);
@@ -72,7 +81,6 @@ export class OrderStore {
 
     order.logs.unshift(newLog);
 
-    // Recompute severity status
     const rr = calculateRunRate(order);
     if (milestone) {
       milestone.status = rr.severity;
@@ -80,6 +88,22 @@ export class OrderStore {
 
     orders[orderIndex] = order;
     this.saveOrders(orders);
+
+    // Sync to NestJS backend
+    fetch(`${API_BASE}/orders/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: order.id,
+        stage: log.stage,
+        quantityCompleted: log.quantityCompleted,
+        supervisorName: log.supervisorName,
+        supervisorUnit: log.supervisorUnit,
+        photoUrl: log.photoUrl,
+        rawNoteTamil: log.rawNoteTamil
+      })
+    }).catch(() => {});
+
     return order;
   }
 
@@ -94,6 +118,16 @@ export class OrderStore {
       log.isConfirmedByMerchandiser = isConfirmed;
       log.visibleToBuyer = visibleToBuyer;
       this.saveOrders(orders);
+
+      fetch(`${API_BASE}/orders/${orderId}/logs/${logId}/category`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          confirmedCategory: category,
+          isConfirmedByMerchandiser: isConfirmed,
+          visibleToBuyer
+        })
+      }).catch(() => {});
     }
   }
 
@@ -114,10 +148,20 @@ export class OrderStore {
     });
 
     this.saveOrders(orders);
+
+    fetch(`${API_BASE}/orders/${orderId}/ex-factory-date`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        newDate,
+        changedBy,
+        reason
+      })
+    }).catch(() => {});
+
     return order;
   }
 
-  // Offline queue methods for Supervisor devices
   static getOfflineQueue(): any[] {
     if (typeof window === 'undefined') return [];
     try {
@@ -140,4 +184,3 @@ export class OrderStore {
     localStorage.removeItem(OFFLINE_QUEUE_KEY);
   }
 }
-
